@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Conversational Jira story creator UI powered by Claude."""
+"""Conversational Jira story creator — describe work in plain English, Claude creates the issues."""
 
 import os
 import time
@@ -83,26 +83,21 @@ TOOLS = [
     {
         "name": "create_jira_issue",
         "description": (
-            f"Create a single Jira issue in the {JIRA_PROJECT_KEY} project. "
-            "Always prefix the summary with the appropriate tag: "
-            "[mobile app], [client portal], [Admin portal], [STRUCTURAL], or [DESIGN]. "
-            "For bugs, prepend [Bug] before the portal tag. "
-            "Use Story for features/improvements, Task for bugs."
+            f"Create a single Jira issue in project {JIRA_PROJECT_KEY}. "
+            "Use Story for features and improvements, Bug for defects. "
+            "Write clear, testable acceptance criteria."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "summary": {
                     "type": "string",
-                    "description": (
-                        "Issue title with prefix tags, "
-                        "e.g. '[Bug] [mobile app] Login button broken'"
-                    ),
+                    "description": "Concise issue title",
                 },
                 "issue_type": {
                     "type": "string",
-                    "enum": ["Story", "Task"],
-                    "description": "Story for features, Task for bugs",
+                    "enum": ["Story", "Bug", "Task"],
+                    "description": "Story for features, Bug for defects, Task for chores",
                 },
                 "description": {
                     "type": "string",
@@ -111,61 +106,44 @@ TOOLS = [
                 "acceptance_criteria": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Specific, testable acceptance criteria (3-6 bullets)",
+                    "description": "Specific, testable acceptance criteria (3-6 items)",
                 },
                 "labels": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": (
-                        "Labels e.g. ['mobile', 'olympus'] "
-                        "or ['client-portal', 'olympus', 'bug']"
-                    ),
+                    "description": "Relevant labels, e.g. ['mobile', 'backend', 'bug']",
                 },
             },
-            "required": [
-                "summary",
-                "issue_type",
-                "description",
-                "acceptance_criteria",
-                "labels",
-            ],
+            "required": ["summary", "issue_type", "description", "acceptance_criteria", "labels"],
         },
     }
 ]
 
-SYSTEM_PROMPT = f"""You are a Jira story creation assistant for the Olympus/Gyglers platform (project: {JIRA_PROJECT_KEY}).
+SYSTEM_PROMPT = f"""You are a Jira story creation assistant for project {JIRA_PROJECT_KEY}.
 
-When the user describes work items, parse each one into a structured Jira issue and create it using the create_jira_issue tool. Handle multiple items in a single message.
+When the user describes work items — in any format, including rough notes or meeting transcripts — extract each distinct item and create a well-structured Jira issue using the create_jira_issue tool.
 
-Title prefix rules (always apply one):
-- [mobile app]    — Gygler mobile app (Angular + Capacitor)
-- [client portal] — client-facing web portal
-- [Admin portal]  — internal admin portal
-- [STRUCTURAL]    — backend / architectural / infrastructure work
-- [DESIGN]        — UI/UX polish
+Guidelines:
+- Story: new features, improvements, enhancements
+- Bug: something broken or behaving incorrectly
+- Task: chores, configuration, non-feature work
+- Write 3-6 specific, testable acceptance criteria per issue
+- Keep summaries under 80 characters
+- Apply sensible labels based on area (e.g. mobile, api, ui, backend, auth)
 
-Bug rule: prepend [Bug] before the portal tag, e.g. "[Bug] [mobile app] ..."
-
-Issue type:
-- Story — features, improvements, new functionality
-- Task  — bugs (always add [Bug] prefix to summary too)
-
-After creating all issues, give a concise summary table:
-| Key | Title | Type |
-listing every created issue."""
+After creating all issues, reply with a concise table:
+| Key | Title | Type |"""
 
 anthropic_client = anthropic.Anthropic()
 
 
 def respond(message: str, history: list) -> Generator[str, None, None]:
-    """Stream Claude's response and execute Jira tool calls as they arrive."""
+    """Stream Claude's response and execute Jira tool calls."""
     messages = []
     for turn in history:
-        # Gradio passes history as list of dicts in messages format
         if isinstance(turn, dict):
             messages.append({"role": turn["role"], "content": turn["content"]})
         else:
-            # Fallback: old-style list-of-lists
             user_msg, assistant_msg = turn
             messages.append({"role": "user", "content": user_msg})
             if assistant_msg:
@@ -232,27 +210,25 @@ def respond(message: str, history: list) -> Generator[str, None, None]:
                 })
 
             messages.append({"role": "user", "content": tool_results})
-
         else:
             break
 
 
 demo = gr.ChatInterface(
     fn=respond,
-    title="Jira Story Creator — Olympus/Gyglers",
+    title="Jira Story Creator",
     description=(
-        f"Describe backlog items in plain English and I'll create them in Jira.  \n"
-        f"**Project:** `{JIRA_PROJECT_KEY}` &nbsp;|&nbsp; **Board:** {JIRA_URL}/jira/software/projects/{JIRA_PROJECT_KEY}/boards"
+        "Describe backlog items in plain English — paste meeting notes, bullet points, "
+        "or rough requirements — and the agent will create structured Jira issues automatically."
     ),
     examples=[
-        "Add a bug: the apply button still shows on expired Gygs in the mobile app",
-        "Create a story to add dark mode support to the client portal",
-        "Structural: refactor the notification handler to use proper enums in the backend",
-        "Bug in admin portal: user search filter returns no results with partial names",
-        "Add a part-time status badge to the Gygler profile card in the client portal",
+        "Add a bug: the login button doesn't work on Safari mobile",
+        "Story: users should be able to export their data as a CSV from the dashboard",
+        "The notification emails are going to spam — needs investigation",
+        "Add two-factor authentication support to the user account settings",
+        "Bug: the date picker crashes when the user selects a past date",
     ],
 )
-
 
 if __name__ == "__main__":
     demo.launch()
